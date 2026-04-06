@@ -1,0 +1,1106 @@
+openapi: 3.0.3
+info:
+  title: API PQRS - Sistema de Gestión de Solicitudes
+  description: |
+    API REST para la gestión de Peticiones, Quejas, Reclamos y Sugerencias (PQRS)
+    de la Universidad del Quindío.
+
+    Arquitectura: Hexagonal + DDD
+    Patrón de DTOs: Domain-First
+
+    ## Agregados Principales
+    - **Usuario**: Gestión de usuarios con roles (ESTUDIANTE, PROFESOR, ADMINISTRATIVO, COORDINADOR)
+    - **Solicitud**: Ciclo de vida completo de solicitudes académicas
+    - **Historial**: Auditoría completa de todas las acciones
+
+    ## Estados de Solicitud
+    `REGISTRADA` → `CLASIFICADA` → `EN_ATENCION` → `ATENDIDA` → `CERRADA`
+  version: 1.0.0
+  contact:
+    name: Equipo de Desarrollo
+    email: soporte@uniquindio.edu.co
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Servidor de desarrollo
+  - url: https://api.uniquindio.edu.co
+    description: Servidor de producción
+
+tags:
+  - name: Usuarios
+    description: Gestión de usuarios del sistema
+  - name: Solicitudes
+    description: Gestión del ciclo de vida de solicitudes
+  - name: Historial
+    description: Auditoría y trazabilidad de acciones
+
+paths:
+  # ==================== USUARIOS ====================
+  /api/usuarios:
+    post:
+      tags:
+        - Usuarios
+      summary: Crear nuevo usuario
+      description: Crea un nuevo usuario en el sistema con rol y estado inicial ACTIVO
+      operationId: crearUsuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrearUsuarioRequest"
+            examples:
+              coordinador:
+                summary: Crear coordinador
+                value:
+                  nombre: Carlos Coordinador
+                  rol: COORDINADOR
+                  email: carlos@uniquindio.edu.co
+              profesor:
+                summary: Crear profesor
+                value:
+                  nombre: Laura Profesora
+                  rol: PROFESOR
+                  email: laura@uniquindio.edu.co
+      responses:
+        "201":
+          description: Usuario creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsuarioDetalleResponse"
+        "400":
+          description: Datos inválidos (email duplicado, formato incorrecto)
+        "500":
+          description: Error interno del servidor
+
+    get:
+      tags:
+        - Usuarios
+      summary: Listar todos los usuarios
+      description: Obtiene la lista completa de usuarios registrados en el sistema
+      operationId: listarUsuarios
+      responses:
+        "200":
+          description: Lista de usuarios obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UsuarioResumenResponse"
+        "500":
+          description: Error interno del servidor
+
+  /api/usuarios/{usuarioId}:
+    get:
+      tags:
+        - Usuarios
+      summary: Obtener usuario por ID
+      description: Obtiene los detalles completos de un usuario específico
+      operationId: obtenerUsuario
+      parameters:
+        - name: usuarioId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        "200":
+          description: Usuario encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsuarioDetalleResponse"
+        "404":
+          description: Usuario no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/usuarios/{usuarioId}/activar:
+    put:
+      tags:
+        - Usuarios
+      summary: Activar usuario
+      description: Cambia el estado de un usuario a ACTIVO
+      operationId: activarUsuario
+      parameters:
+        - name: usuarioId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivarUsuarioRequest"
+      responses:
+        "204":
+          description: Usuario activado exitosamente
+        "404":
+          description: Usuario no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/usuarios/{usuarioId}/desactivar:
+    put:
+      tags:
+        - Usuarios
+      summary: Desactivar usuario
+      description: Cambia el estado de un usuario a INACTIVO
+      operationId: desactivarUsuario
+      parameters:
+        - name: usuarioId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DesactivarUsuarioRequest"
+      responses:
+        "204":
+          description: Usuario desactivado exitosamente
+        "404":
+          description: Usuario no encontrado
+        "500":
+          description: Error interno del servidor
+
+  # ==================== SOLICITUDES ====================
+  /api/solicitudes:
+    post:
+      tags:
+        - Solicitudes
+      summary: Crear nueva solicitud
+      description: |
+        Registra una nueva solicitud en el sistema.
+
+        **Regla de negocio**: El solicitante debe estar activo y no puede tener
+        más de 5 solicitudes pendientes (REGISTRADA, CLASIFICADA, EN_ATENCION).
+      operationId: crearSolicitud
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrearSolicitudRequest"
+            example:
+              solicitanteId: 550e8400-e29b-41d4-a716-446655440000
+              nombreSolicitante: Ana Estudiante
+              canalOrigen: APLICACION_WEB
+              descripcion: Necesito apoyo con una solicitud académica urgente de homologación de asignaturas
+      responses:
+        "201":
+          description: Solicitud creada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Datos inválidos o solicitante excede límite de solicitudes pendientes
+        "404":
+          description: Solicitante no encontrado o inactivo
+        "500":
+          description: Error interno del servidor
+
+    get:
+      tags:
+        - Solicitudes
+      summary: Listar todas las solicitudes
+      description: Obtiene la lista de todas las solicitudes registradas
+      operationId: listarSolicitudes
+      responses:
+        "200":
+          description: Lista de solicitudes obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SolicitudResumenResponse"
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}:
+    get:
+      tags:
+        - Solicitudes
+      summary: Obtener solicitud por ID
+      description: |
+        Obtiene los detalles completos de una solicitud incluyendo su historial
+        de auditoría completo.
+      operationId: obtenerSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+      responses:
+        "200":
+          description: Solicitud encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "404":
+          description: Solicitud no encontrada
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/solicitante/{solicitanteId}:
+    get:
+      tags:
+        - Solicitudes
+      summary: Listar solicitudes por solicitante
+      description: Obtiene todas las solicitudes registradas por un usuario específico
+      operationId: listarSolicitudesPorSolicitante
+      parameters:
+        - name: solicitanteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista de solicitudes obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SolicitudResumenResponse"
+        "404":
+          description: Solicitante no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}/clasificar:
+    put:
+      tags:
+        - Solicitudes
+      summary: Clasificar solicitud
+      description: |
+        Asigna un tipo a la solicitud.
+
+        **Transición de estado**: REGISTRADA → CLASIFICADA
+        **Requerimiento**: Solicitud debe estar en estado REGISTRADA
+      operationId: clasificarSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClasificarSolicitudRequest"
+            example:
+              solicitudId: 770e8400-e29b-41d4-a716-446655440003
+              tipo: PETICION
+              coordinadorId: 550e8400-e29b-41d4-a716-446655440000
+              nombreCoordinador: Carlos Coordinador
+      responses:
+        "200":
+          description: Solicitud clasificada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Solicitud no está en estado REGISTRADA
+        "404":
+          description: Solicitud o coordinador no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}/priorizar:
+    put:
+      tags:
+        - Solicitudes
+      summary: Priorizar solicitud
+      description: |
+        Asigna una prioridad y justificación a la solicitud.
+
+        **Requerimiento**: Solicitud debe estar en estado CLASIFICADA
+        **Validación**: Justificación entre 5-300 caracteres
+      operationId: priorizarSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriorizarSolicitudRequest"
+            example:
+              solicitudId: 770e8400-e29b-41d4-a716-446655440003
+              prioridad: MEDIA
+              justificacion: Solicitud académica que requiere revisión urgente por cierre de período académico
+              coordinadorId: 550e8400-e29b-41d4-a716-446655440000
+              nombreCoordinador: Carlos Coordinador
+      responses:
+        "200":
+          description: Solicitud priorizada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Solicitud no está en estado CLASIFICADA o justificación inválida
+        "404":
+          description: Solicitud o coordinador no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}/asignar-responsable:
+    put:
+      tags:
+        - Solicitudes
+      summary: Asignar responsable a solicitud
+      description: |
+        Asigna un profesor como responsable de atender la solicitud.
+
+        **Transición de estado**: CLASIFICADA → EN_ATENCION
+        **Requerimiento**: Solicitud debe estar en estado CLASIFICADA
+        **Regla de negocio**: Profesor debe estar activo y no puede tener más de 10 solicitudes EN_ATENCION
+      operationId: asignarResponsable
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AsignarResponsableSolicitudRequest"
+            example:
+              solicitudId: 770e8400-e29b-41d4-a716-446655440003
+              responsableId: 880e8400-e29b-41d4-a716-446655440002
+              nombreResponsable: Laura Profesora
+              coordinadorId: 550e8400-e29b-41d4-a716-446655440000
+              nombreCoordinador: Carlos Coordinador
+      responses:
+        "200":
+          description: Responsable asignado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Solicitud no está en estado CLASIFICADA o profesor excede límite de solicitudes
+        "404":
+          description: Solicitud, profesor o coordinador no encontrado
+        "409":
+          description: Profesor inactivo o sin rol de PROFESOR
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}/atender:
+    put:
+      tags:
+        - Solicitudes
+      summary: Marcar solicitud como atendida
+      description: |
+        Indica que el responsable ha completado la atención de la solicitud.
+
+        **Transición de estado**: EN_ATENCION → ATENDIDA
+        **Requerimiento**: Solo el responsable asignado puede atender
+      operationId: marcarAtendida
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarcarAtendidaSolicitudRequest"
+            example:
+              solicitudId: 770e8400-e29b-41d4-a716-446655440003
+              responsableId: 880e8400-e29b-41d4-a716-446655440002
+              nombreResponsable: Laura Profesora
+              observacion: Solicitud atendida y documentación revisada correctamente. Homologación aprobada.
+      responses:
+        "200":
+          description: Solicitud marcada como atendida exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Solicitud no está en estado EN_ATENCION o usuario no es el responsable
+        "404":
+          description: Solicitud o responsable no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/solicitudes/{solicitudId}/cerrar:
+    put:
+      tags:
+        - Solicitudes
+      summary: Cerrar solicitud
+      description: |
+        Cierra definitivamente una solicitud.
+
+        **Transición de estado**: ATENDIDA → CERRADA (estado final, irreversible)
+        **Requerimiento**: Solicitud debe estar en estado ATENDIDA
+      operationId: cerrarSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CerrarSolicitudRequest"
+            example:
+              solicitudId: 770e8400-e29b-41d4-a716-446655440003
+              responsableId: 880e8400-e29b-41d4-a716-446655440002
+              nombreResponsable: Laura Profesora
+              observacionCierre: Caso cerrado satisfactoriamente. Documentación completa y archivada en expediente estudiantil.
+      responses:
+        "200":
+          description: Solicitud cerrada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolicitudDetalleResponse"
+        "400":
+          description: Solicitud no está en estado ATENDIDA
+        "404":
+          description: Solicitud no encontrada
+        "500":
+          description: Error interno del servidor
+
+  # ==================== HISTORIAL ====================
+  /api/historial:
+    get:
+      tags:
+        - Historial
+      summary: Listar todo el historial del sistema
+      description: |
+        Obtiene el historial completo de todas las acciones registradas en el sistema.
+
+        **Paginación**: Se recomienda usar parámetros de paginación para resultados grandes.
+      operationId: listarHistorial
+      parameters:
+        - name: limite
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Límite de registros a devolver
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Desplazamiento para paginación
+      responses:
+        "200":
+          description: Historial obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EntradaHistorialResponse"
+        "500":
+          description: Error interno del servidor
+
+  /api/historial/{historialId}:
+    get:
+      tags:
+        - Historial
+      summary: Obtener entrada de historial por ID
+      description: Obtiene los detalles de una entrada específica del historial de auditoría
+      operationId: obtenerEntradaHistorial
+      parameters:
+        - name: historialId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 990e8400-e29b-41d4-a716-446655440004
+      responses:
+        "200":
+          description: Entrada de historial encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntradaHistorialResponse"
+        "404":
+          description: Entrada de historial no encontrada
+        "500":
+          description: Error interno del servidor
+
+  /api/historial/solicitud/{solicitudId}:
+    get:
+      tags:
+        - Historial
+      summary: Listar historial de una solicitud
+      description: |
+        Obtiene el historial completo de auditoría para una solicitud específica.
+
+        Incluye todas las acciones realizadas: creación, clasificación, priorización,
+        asignación de responsable, atención y cierre.
+      operationId: listarHistorialPorSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+      responses:
+        "200":
+          description: Historial de solicitud obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EntradaHistorialResponse"
+        "404":
+          description: Solicitud no encontrada
+        "500":
+          description: Error interno del servidor
+
+  /api/historial/usuario/{usuarioId}:
+    get:
+      tags:
+        - Historial
+      summary: Listar acciones de un usuario
+      description: |
+        Obtiene todas las acciones realizadas por un usuario específico en el sistema.
+
+        Útil para auditoria de actividades y seguimiento de cambios realizados
+        por coordinadores, profesores, etc.
+      operationId: listarHistorialPorUsuario
+      parameters:
+        - name: usuarioId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        - name: limite
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Límite de registros a devolver
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Desplazamiento para paginación
+      responses:
+        "200":
+          description: Historial de usuario obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EntradaHistorialResponse"
+        "404":
+          description: Usuario no encontrado
+        "500":
+          description: Error interno del servidor
+
+  /api/historial/accion/{accion}:
+    get:
+      tags:
+        - Historial
+      summary: Listar historial por tipo de acción
+      description: |
+        Obtiene todas las entradas del historial de un tipo de acción específico.
+
+        Útil para filtrar y analizar tipos específicos de cambios en el sistema.
+      operationId: listarHistorialPorAccion
+      parameters:
+        - name: accion
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/AccionHistorial"
+          description: Tipo de acción a filtrar
+          example: CLASIFICAR_SOLICITUD
+        - name: limite
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Límite de registros a devolver
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Desplazamiento para paginación
+      responses:
+        "200":
+          description: Historial filtrado por acción obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EntradaHistorialResponse"
+        "400":
+          description: Tipo de acción inválido
+        "500":
+          description: Error interno del servidor
+
+components:
+  schemas:
+    # ==================== USUARIO SCHEMAS ====================
+    CrearUsuarioRequest:
+      type: object
+      required:
+        - nombre
+        - rol
+        - email
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Carlos Coordinador
+          description: Nombre completo del usuario
+        rol:
+          $ref: "#/components/schemas/Rol"
+        email:
+          type: string
+          format: email
+          example: carlos@uniquindio.edu.co
+          description: Email válido del usuario
+
+    ActivarUsuarioRequest:
+      type: object
+      required:
+        - usuarioId
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    DesactivarUsuarioRequest:
+      type: object
+      required:
+        - usuarioId
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    UsuarioDetalleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombre:
+          type: string
+          example: Carlos Coordinador
+        rol:
+          $ref: "#/components/schemas/Rol"
+        email:
+          type: string
+          format: email
+          example: carlos@uniquindio.edu.co
+        estado:
+          $ref: "#/components/schemas/EstadoUsuario"
+        activo:
+          type: boolean
+          example: true
+
+    UsuarioResumenResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombre:
+          type: string
+          example: Carlos Coordinador
+        rol:
+          $ref: "#/components/schemas/Rol"
+        estado:
+          $ref: "#/components/schemas/EstadoUsuario"
+
+    # ==================== SOLICITUD SCHEMAS ====================
+    CrearSolicitudRequest:
+      type: object
+      required:
+        - solicitanteId
+        - nombreSolicitante
+        - canalOrigen
+        - descripcion
+      properties:
+        solicitanteId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+          description: ID del usuario que registra la solicitud
+        nombreSolicitante:
+          type: string
+          example: Ana Estudiante
+          description: Nombre del solicitante
+        canalOrigen:
+          $ref: "#/components/schemas/CanalOrigen"
+        descripcion:
+          type: string
+          minLength: 10
+          maxLength: 500
+          example: Necesito apoyo con una solicitud académica urgente de homologación de asignaturas
+          description: Descripción detallada de la solicitud
+
+    ClasificarSolicitudRequest:
+      type: object
+      required:
+        - solicitudId
+        - tipo
+        - coordinadorId
+        - nombreCoordinador
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        tipo:
+          $ref: "#/components/schemas/TipoSolicitud"
+        coordinadorId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreCoordinador:
+          type: string
+          example: Carlos Coordinador
+
+    PriorizarSolicitudRequest:
+      type: object
+      required:
+        - solicitudId
+        - prioridad
+        - justificacion
+        - coordinadorId
+        - nombreCoordinador
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        prioridad:
+          $ref: "#/components/schemas/Prioridad"
+        justificacion:
+          type: string
+          minLength: 5
+          maxLength: 300
+          example: Solicitud académica que requiere revisión urgente por cierre de período
+        coordinadorId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreCoordinador:
+          type: string
+          example: Carlos Coordinador
+
+    AsignarResponsableSolicitudRequest:
+      type: object
+      required:
+        - solicitudId
+        - responsableId
+        - nombreResponsable
+        - coordinadorId
+        - nombreCoordinador
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        responsableId:
+          type: string
+          format: uuid
+          example: 880e8400-e29b-41d4-a716-446655440002
+          description: ID del profesor responsable
+        nombreResponsable:
+          type: string
+          example: Laura Profesora
+        coordinadorId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreCoordinador:
+          type: string
+          example: Carlos Coordinador
+
+    MarcarAtendidaSolicitudRequest:
+      type: object
+      required:
+        - solicitudId
+        - responsableId
+        - nombreResponsable
+        - observacion
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        responsableId:
+          type: string
+          format: uuid
+          example: 880e8400-e29b-41d4-a716-446655440002
+        nombreResponsable:
+          type: string
+          example: Laura Profesora
+        observacion:
+          type: string
+          example: Solicitud atendida y documentación revisada correctamente
+
+    CerrarSolicitudRequest:
+      type: object
+      required:
+        - solicitudId
+        - responsableId
+        - nombreResponsable
+        - observacionCierre
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        responsableId:
+          type: string
+          format: uuid
+          example: 880e8400-e29b-41d4-a716-446655440002
+        nombreResponsable:
+          type: string
+          example: Laura Profesora
+        observacionCierre:
+          type: string
+          example: Caso cerrado satisfactoriamente. Documentación archivada.
+
+    SolicitudDetalleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        solicitanteId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreSolicitante:
+          type: string
+          example: Ana Estudiante
+        canalOrigen:
+          $ref: "#/components/schemas/CanalOrigen"
+        fechaRegistro:
+          type: string
+          format: date-time
+          example: "2026-04-05T10:30:00Z"
+        tipo:
+          $ref: "#/components/schemas/TipoSolicitud"
+        descripcion:
+          type: string
+          example: Necesito apoyo con una solicitud académica urgente
+        prioridad:
+          $ref: "#/components/schemas/Prioridad"
+        justificacionPrioridad:
+          type: string
+          nullable: true
+          example: Solicitud académica que requiere revisión urgente
+        estado:
+          $ref: "#/components/schemas/EstadoSolicitud"
+        responsableId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 880e8400-e29b-41d4-a716-446655440002
+        nombreResponsable:
+          type: string
+          nullable: true
+          example: Laura Profesora
+        historial:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntradaHistorialResponse"
+
+    SolicitudResumenResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 770e8400-e29b-41d4-a716-446655440003
+        solicitanteId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreSolicitante:
+          type: string
+          example: Ana Estudiante
+        canalOrigen:
+          $ref: "#/components/schemas/CanalOrigen"
+        fechaRegistro:
+          type: string
+          format: date-time
+          example: "2026-04-05T10:30:00Z"
+        tipo:
+          $ref: "#/components/schemas/TipoSolicitud"
+        prioridad:
+          $ref: "#/components/schemas/Prioridad"
+        estado:
+          $ref: "#/components/schemas/EstadoSolicitud"
+        nombreResponsable:
+          type: string
+          nullable: true
+          example: Laura Profesora
+
+    # ==================== HISTORIAL SCHEMAS ====================
+    EntradaHistorialResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 990e8400-e29b-41d4-a716-446655440004
+        fechaHora:
+          type: string
+          format: date-time
+          example: "2026-04-05T10:30:00Z"
+        accion:
+          $ref: "#/components/schemas/AccionHistorial"
+        usuarioId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombreUsuario:
+          type: string
+          example: Ana Estudiante
+        observacion:
+          type: string
+          example: Solicitud registrada
+
+    # ==================== ENUMS ====================
+    Rol:
+      type: string
+      enum:
+        - ESTUDIANTE
+        - PROFESOR
+        - ADMINISTRATIVO
+        - COORDINADOR
+      description: Rol del usuario en el sistema
+
+    EstadoUsuario:
+      type: string
+      enum:
+        - ACTIVO
+        - INACTIVO
+      description: Estado de actividad del usuario
+
+    TipoSolicitud:
+      type: string
+      enum:
+        - QUEJA
+        - RECLAMO
+        - SUGERENCIA
+        - PETICION
+        - FELICITACION
+      description: Tipo de solicitud académica
+
+    EstadoSolicitud:
+      type: string
+      enum:
+        - REGISTRADA
+        - CLASIFICADA
+        - EN_ATENCION
+        - ATENDIDA
+        - CERRADA
+      description: Estado actual de la solicitud
+
+    Prioridad:
+      type: string
+      enum:
+        - BAJA
+        - MEDIA
+        - ALTA
+      description: Nivel de prioridad asignado a la solicitud
+
+    CanalOrigen:
+      type: string
+      enum:
+        - PRESENCIAL
+        - TELEFONICO
+        - CORREO_ELECTRONICO
+        - APLICACION_WEB
+        - APLICACION_MOVIL
+      description: Canal mediante el cual se registra la solicitud
+
+    AccionHistorial:
+      type: string
+      enum:
+        - REGISTRAR_SOLICITUD
+        - CLASIFICAR_SOLICITUD
+        - PRIORIZAR_SOLICITUD
+        - ASIGNAR_RESPONSABLE
+        - MARCAR_ATENDIDA
+        - CERRAR_SOLICITUD
+      description: Tipo de acción registrada en el historial de auditoría
