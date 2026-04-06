@@ -128,9 +128,3 @@ Para entender mejor la estructura y probar los endpoints, puedes usar Swagger Ed
 * Jack Alejandro Marín Hernández
 
 ---
-
-## 📌 Notas Finales
-
-Este proyecto no solo busca implementar una API funcional, sino también aplicar buenas prácticas de diseño de software, enfocándose en la claridad del dominio y la correcta separación de capas.
-
-Es una base sólida para sistemas empresariales que requieren trazabilidad, control de procesos y escalabilidad.
